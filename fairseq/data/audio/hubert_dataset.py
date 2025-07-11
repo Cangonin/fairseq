@@ -3,23 +3,22 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import io
 import itertools
 import logging
 import os
+import random
 import sys
 from typing import Any, List, Optional, Union
 
 import numpy as np
-
 import torch
 import torch.nn.functional as F
+from torch.utils.data import BatchSampler
+
 from fairseq.data import data_utils
+from fairseq.data.audio.audio_utils import parse_path, read_from_stored_zip
 from fairseq.data.fairseq_dataset import FairseqDataset
-from fairseq.data.audio.audio_utils import (
-    parse_path,
-    read_from_stored_zip,
-)
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -354,3 +353,123 @@ class HubertDataset(FairseqDataset):
             with torch.no_grad():
                 wav = F.layer_norm(wav, wav.shape)
         return wav
+
+
+class HubertMTLDataset(HubertDataset):
+    def __init__(
+        self,
+        manifest_path,
+        sample_rate,
+        label_paths,
+        label_rates,
+        ssl_num_samples,
+        pad_list,
+        eos_list,
+        label_processors=None,
+        max_keep_sample_size=None,
+        min_keep_sample_size=None,
+        max_sample_size=None,
+        shuffle=True,
+        pad_audio=False,
+        normalize=False,
+        store_labels=True,
+        random_crop=False,
+        single_target=False,
+    ):
+        super().__init__(
+            manifest_path,
+            sample_rate,
+            label_paths,
+            label_rates,
+            pad_list,
+            eos_list,
+            label_processors,
+            max_keep_sample_size,
+            min_keep_sample_size,
+            max_sample_size,
+            shuffle,
+            pad_audio,
+            normalize,
+            store_labels,
+            random_crop,
+            single_target,
+        )
+        self.ssl_num_samples = ssl_num_samples
+
+    def __getitem__(self, index):
+        wav = self.get_audio(index)
+        labels = self.get_labels(index)
+        is_item_annotated = index >= self.ssl_num_samples
+        return {
+            "id": index,
+            "source": wav,
+            "label_list": labels,
+            "is_item_annotated": is_item_annotated,
+        }
+
+
+# TODO: adapt this code for distributed sampling?
+class UnevenBatchSampler(BatchSampler):
+    def __init__(
+        self,
+        size_dataset: int,
+        batch_size: int,
+        num_samples_unlabelled_dataset: int,
+        supervised_sampling_ratio: float = 0.5,
+        drop_last=False,
+    ):
+        """
+        Args:
+            dataset (Dataset): The dataset to sample from. It should be composed of all the unlabelled data followed by the labelled data
+            batch_size (int): Total batch size.
+            num_samples_unlabelled_dataset (int): Tot number of samples of the unlabelled data. Samples after this values belong to the labelled data
+            supervised_sampling_ratio (float): How much data from the supervised part should be included in the final batch
+            drop_last (bool): Whether to drop the last incomplete batch.
+        """
+        assert (
+            0 < supervised_sampling_ratio < 1
+        ), "supervised_sampling_ratio must be between 0 and 1 (exclusive)."
+
+        self.batch_size = batch_size
+        self.ssl_all_indices = [i for i in range(num_samples_unlabelled_dataset)]
+        self.drop_last = drop_last
+
+        all_indices = set(range(size_dataset))
+        self.supervised_all_indices = list(all_indices - set(self.ssl_all_indices))
+        self.supervised_sampling_ratio = supervised_sampling_ratio
+
+        if len(self.ssl_all_indices) == 0 or len(self.supervised_all_indices) == 0:
+            raise ValueError(
+                "indices_ssl_task and indices_supervised_task must both be non-empty."
+            )
+
+        # Compute batch component sizes
+        self.supervised_size = round(self.supervised_sampling_ratio * self.batch_size)
+        self.ssl_size = self.batch_size - self.supervised_size
+
+        # Estimate number of batches available. TODO: change that so that the num of batches doesn't depend on the supervised data?
+        # It could depend on the unsupervised data, but then I need to implement this in the sampler
+        self.num_batches = min(
+            len(self.ssl_all_indices) // self.ssl_size,
+            len(self.supervised_all_indices) // self.supervised_size,
+        )
+
+    def __iter__(self):
+        ssl_samples = random.sample(self.ssl_all_indices, len(self.ssl_all_indices))
+        supervised_samples = random.sample(
+            self.supervised_all_indices, len(self.supervised_all_indices)
+        )
+
+        for i in range(self.num_batches):
+            ssl_start = i * self.ssl_size
+            supervised_start = i * self.supervised_size
+            batch = (
+                ssl_samples[ssl_start : ssl_start + self.ssl_size]
+                + supervised_samples[
+                    supervised_start : supervised_start + self.supervised_size
+                ]
+            )
+            yield batch
+
+    def __len__(self):
+        return self.num_batches if self.drop_last else self.num_batches + 1
