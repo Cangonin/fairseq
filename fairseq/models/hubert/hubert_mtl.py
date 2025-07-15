@@ -17,27 +17,37 @@ from fairseq.data.data_utils import compute_mask_indices
 from fairseq.data.dictionary import Dictionary
 from fairseq.dataclass import ChoiceEnum, FairseqDataclass
 from fairseq.models import BaseFairseqModel, register_model
+from fairseq.models.hubert import HubertConfig
 from fairseq.models.hubert.hubert import HubertModel
 from fairseq.models.wav2vec.wav2vec2 import (
     EXTRACTOR_MODE_CHOICES,
-    MASKING_DISTRIBUTION_CHOICES,
     LAYER_TYPE_CHOICES,
+    MASKING_DISTRIBUTION_CHOICES,
     ConvFeatureExtractionModel,
     TransformerEncoder,
 )
-from fairseq.models.hubert import HubertConfig
 from fairseq.modules import GradMultiply, LayerNorm
-from fairseq.tasks.hubert_mtl_pretraining import HubertMTLPretrainingConfig, HubertMTLPretrainingTask
+from fairseq.tasks.hubert_mtl_pretraining import (
+    HubertMTLPretrainingConfig,
+    HubertMTLPretrainingTask,
+)
+
 logger = logging.getLogger(__name__)
 
-#TODO: find the number of supervised classes with another way
+
+# TODO: find the number of supervised classes with another way
 @dataclass
 class HubertMTLConfig(HubertConfig):
     # balance between the supervised and self-supervised tasks
     proportion_supervised_data: float = field(
-        default=0.1, metadata={"help": "the proportion of supervised data in each training batch"}
+        default=0.1,
+        metadata={"help": "the proportion of supervised data in each training batch"},
     )
-    num_classes_supervised: int = field(default=5, metadata={"help": "the number of classes included in the supervised task"})
+    num_classes_supervised: int = field(
+        default=5,
+        metadata={"help": "the number of classes included in the supervised task"},
+    )
+
 
 @register_model("hubert_mtl", dataclass=HubertMTLConfig)
 class HubertMTLModel(HubertModel):
@@ -48,7 +58,7 @@ class HubertMTLModel(HubertModel):
         dictionaries: List[Dictionary],
     ) -> None:
         super().__init__(cfg, task_cfg, dictionaries)
-        
+
         final_dim = cfg.final_dim if cfg.final_dim > 0 else cfg.encoder_embed_dim
         self.final_proj_supervised = nn.Linear(final_dim, cfg.num_classes_supervised)
 
@@ -151,9 +161,10 @@ class HubertMTLModel(HubertModel):
         else:
             logit_u_list = [None for _ in target_list]
 
-
         # supervised part (will give an output for everything, even for the parts without labels)
-        x_mean = torch.mean(x) #TODO: should we max pool instead? I guess mean is better because the vocalisations are longer than 25 ms?
+        x_mean = torch.mean(
+            x
+        )  # TODO: should we max pool instead? I guess mean is better because the vocalisations are longer than 25 ms?
         logits_supervised = self.final_proj_supervised(x)
 
         result = {
@@ -161,13 +172,13 @@ class HubertMTLModel(HubertModel):
             "logit_u_list": logit_u_list,
             "padding_mask": padding_mask,
             "features_pen": features_pen,
-            "logits_supervised": logits_supervised
+            "logits_supervised": logits_supervised,
         }
         return result
-    
+
     def get_supervised_logits(self, net_output):
         return net_output["logits_supervised"]
-    
+
     def remove_pretraining_modules(self):
         self.target_glu = None
         self.final_proj = None

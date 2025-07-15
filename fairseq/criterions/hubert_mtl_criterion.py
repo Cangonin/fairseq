@@ -10,15 +10,17 @@ from typing import List, Optional
 
 import torch
 import torch.nn.functional as F
+
 from fairseq import utils
+from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.criterions.hubert_criterion import HubertCriterion, HubertCriterionConfig
 from fairseq.logging import metrics
-from fairseq.criterions import FairseqCriterion, register_criterion
+
 
 # TODO: constrain the weight of the unsupervised task
 # TODO: see if I can put the supervised_task_weight in the loss_weights part instead?
 # If I change the proportion of the supervised data, I will have to account for it in the loss, since it will change the magnitude of the loss.
-# Should I divide by the number of examples when computing the loss function to circumvent this problem? Or I could keep the proprotion of 
+# Should I divide by the number of examples when computing the loss function to circumvent this problem? Or I could keep the proprotion of
 # supervised samples constant, but only vary the weight
 @dataclass
 class HubertMTLCriterionConfig(HubertCriterionConfig):
@@ -40,14 +42,15 @@ class HubertMTLCriterion(HubertCriterion):
         loss_weights=None,
         log_keys=None,
     ):
-        super().__init__(task)
+        super().__init__(
+            task, pred_masked_weight, pred_nomask_weight, loss_weights, log_keys
+        )
         self.supervised_task_weight = supervised_task_weight
         self.pred_masked_weight = pred_masked_weight
         self.pred_nomask_weight = pred_nomask_weight
         self.loss_weights = loss_weights
         self.log_keys = [] if log_keys is None else log_keys
 
-    
     # TODO: should I modify the forward function of the model?
     def forward(self, model, sample, reduce=True, log_pred=False):
         """Compute the loss for the given sample.
@@ -87,20 +90,28 @@ class HubertMTLCriterion(HubertCriterion):
             sample_size += targ_u_list[0].numel()
 
         # TODO: do it correctly
-        def compute_supervised_loss(mask_supervised: torch.Tensor, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-            loss = F.binary_cross_entropy_with_logits(logits, target=labels, reduction=None)
+        def compute_supervised_loss(
+            mask_supervised: torch.Tensor, logits: torch.Tensor, labels: torch.Tensor
+        ) -> torch.Tensor:
+            loss = F.binary_cross_entropy_with_logits(
+                logits, target=labels, reduction=None
+            )
             masked_loss = loss * mask_supervised
-            task_loss = torch.sum(masked_loss) / torch.count_nonzero(
-                    masked_loss
-                )
+            task_loss = torch.sum(masked_loss) / torch.count_nonzero(masked_loss)
             return task_loss
-        
-        supervised_loss = compute_supervised_loss(mask_supervised=sample["mask_supervised"], logits=model.get_supervised_logits(net_output), labels=sample["supervised_labels"])
+
+        supervised_loss = compute_supervised_loss(
+            mask_supervised=sample["mask_supervised"],
+            logits=model.get_supervised_logits(net_output),
+            labels=sample["supervised_labels"],
+        )
         loss += self.supervised_task_weight * supervised_loss
-        
+
         if self.loss_weights is not None:
             assert hasattr(model, "get_extra_losses")
-            extra_losses, names = model.get_extra_losses(net_output) #TODO: implement loss there instead?
+            extra_losses, names = model.get_extra_losses(
+                net_output
+            )  # TODO: implement loss there instead?
             if torch.is_tensor(extra_losses):
                 extra_losses = [extra_losses]
                 names = [names]

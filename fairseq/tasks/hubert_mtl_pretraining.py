@@ -7,11 +7,13 @@
 
 import logging
 from dataclasses import dataclass, field
+from typing import List, Optional
 
 from omegaconf import MISSING
 
 from fairseq.data import FairseqDataset, data_utils, iterators
 from fairseq.data.audio.hubert_dataset import HubertMTLDataset, UnevenBatchSampler
+from fairseq.dataclass.configs import FairseqDataclass
 from fairseq.tasks import register_task
 from fairseq.tasks.hubert_pretraining import (
     HubertPretrainingConfig,
@@ -25,11 +27,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class HubertMTLPretrainingConfig(HubertPretrainingConfig):
     # we want to get the number of ssl examples for the dataset to know where the border beterrn the ssl and the supervised data is
-    ssl_data: str = (
-        field(
-            default=MISSING,
-            metadata={"help": "path to data directory containing the the ssl data"},
-        ),
+    ssl_data: str = field(
+        default=MISSING,
+        metadata={"help": "path to data directory containing the the ssl data"},
     )
 
 
