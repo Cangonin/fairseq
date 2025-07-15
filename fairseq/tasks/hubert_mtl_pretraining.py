@@ -179,6 +179,8 @@ class HubertMTLPretrainingTask(HubertPretrainingTask):
             #     )
 
             # create mini-batches with given size constraints
+
+            # TODO: see if this is what was expected
             batches = UnevenBatchSampler(
                 len(self.dataset),
                 num_samples_unlabelled_dataset=self.dataset.ssl_num_samples,
