@@ -407,6 +407,53 @@ class HubertMTLDataset(HubertDataset):
             "is_item_annotated": is_item_annotated,
         }
 
+    # Changed the net input so that I can add whether items are annotated or not
+    def collater(self, samples):
+        # target = max(sizes) -> random_crop not used
+        # target = max_sample_size -> random_crop used for long
+        samples = [s for s in samples if s["source"] is not None]
+        if len(samples) == 0:
+            return {}
+
+        audios = [s["source"] for s in samples]
+        audio_sizes = [len(s) for s in audios]
+        if self.pad_audio:
+            audio_size = min(max(audio_sizes), self.max_sample_size)
+        else:
+            audio_size = min(min(audio_sizes), self.max_sample_size)
+        collated_audios, padding_mask, audio_starts = self.collater_audio(
+            audios, audio_size
+        )
+
+        targets_by_label = [
+            [s["label_list"][i] for s in samples] for i in range(self.num_labels)
+        ]
+        targets_list, lengths_list, ntokens_list = self.collater_label(
+            targets_by_label, audio_size, audio_starts
+        )
+
+        net_input = {
+            "source": collated_audios,
+            "padding_mask": padding_mask,
+            "is_item_annotated": torch.BoolTensor(
+                [s["is_item_annotated"] for s in samples]
+            ),
+        }
+        batch = {
+            "id": torch.LongTensor([s["id"] for s in samples]),
+            "net_input": net_input,
+        }
+
+        if self.single_target:
+            batch["target_lengths"] = lengths_list[0]
+            batch["ntokens"] = ntokens_list[0]
+            batch["target"] = targets_list[0]
+        else:
+            batch["target_lengths_list"] = lengths_list
+            batch["ntokens_list"] = ntokens_list
+            batch["target_list"] = targets_list
+        return batch
+
 
 # TODO: adapt this code for distributed sampling?
 class UnevenBatchSampler(BatchSampler):

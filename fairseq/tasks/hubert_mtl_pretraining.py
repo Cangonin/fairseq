@@ -182,8 +182,9 @@ class HubertMTLPretrainingTask(HubertPretrainingTask):
 
             # TODO: see if this is what was expected
             batches = UnevenBatchSampler(
-                len(self.dataset),
-                num_samples_unlabelled_dataset=self.dataset.ssl_num_samples,
+                len(dataset),
+                batch_size=64,  # TODO: use max_tokens somehow instead or define the batch size in the config
+                num_samples_unlabelled_dataset=dataset.ssl_num_samples,
             )
             return batches
 
