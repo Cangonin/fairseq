@@ -376,25 +376,48 @@ class HubertMTLDataset(HubertDataset):
         random_crop=False,
         single_target=False,
     ):
-        super().__init__(
-            manifest_path,
-            sample_rate,
-            label_paths,
-            label_rates,
-            pad_list,
-            eos_list,
-            label_processors,
-            max_keep_sample_size,
-            min_keep_sample_size,
-            max_sample_size,
-            shuffle,
-            pad_audio,
-            normalize,
-            store_labels,
-            random_crop,
-            single_target,
+        self.audio_root, self.audio_names, inds, tot, self.sizes = load_audio(
+            manifest_path, max_keep_sample_size, min_keep_sample_size
         )
+        self.sample_rate = sample_rate
+        self.shuffle = shuffle
+        self.random_crop = random_crop
+
+        self.num_labels = len(label_paths)
+        self.pad_list = pad_list
+        self.eos_list = eos_list
+        self.label_processors = label_processors
+        self.single_target = single_target
+        self.label_rates = (
+            [label_rates for _ in range(len(label_paths))]
+            if isinstance(label_rates, float)
+            else label_rates
+        )
+        self.store_labels = store_labels
         self.ssl_num_samples = ssl_num_samples
+
+        if store_labels:
+            self.label_list = [load_label(p, inds, tot) for p in label_paths]
+        else:
+            self.label_paths = label_paths
+            self.label_offsets_list = [
+                load_label_offset(p, inds, tot) for p in label_paths
+            ]
+        assert label_processors is None or len(label_processors) == self.num_labels
+        for label_path, label_rate in zip(label_paths, self.label_rates):
+            self.verify_label_lengths(
+                self.sizes, sample_rate, label_path, label_rate, inds, tot
+            )
+
+        self.max_sample_size = (
+            max_sample_size if max_sample_size is not None else sys.maxsize
+        )
+        self.pad_audio = pad_audio
+        self.normalize = normalize
+        logger.info(
+            f"pad_audio={pad_audio}, random_crop={random_crop}, "
+            f"normalize={normalize}, max_sample_size={self.max_sample_size}"
+        )
 
     def __getitem__(self, index):
         wav = self.get_audio(index)
@@ -416,6 +439,7 @@ class HubertMTLDataset(HubertDataset):
             return {}
 
         audios = [s["source"] for s in samples]
+        is_item_annotated = torch.BoolTensor([s["is_item_annotated"] for s in samples])
         audio_sizes = [len(s) for s in audios]
         if self.pad_audio:
             audio_size = min(max(audio_sizes), self.max_sample_size)
@@ -429,18 +453,16 @@ class HubertMTLDataset(HubertDataset):
             [s["label_list"][i] for s in samples] for i in range(self.num_labels)
         ]
         targets_list, lengths_list, ntokens_list = self.collater_label(
-            targets_by_label, audio_size, audio_starts
+            targets_by_label, audio_size, audio_starts, is_item_annotated
         )
 
         net_input = {
             "source": collated_audios,
             "padding_mask": padding_mask,
-            "is_item_annotated": torch.BoolTensor(
-                [s["is_item_annotated"] for s in samples]
-            ),
         }
         batch = {
             "id": torch.LongTensor([s["id"] for s in samples]),
+            "is_item_annotated": is_item_annotated,
             "net_input": net_input,
         }
 
@@ -453,6 +475,94 @@ class HubertMTLDataset(HubertDataset):
             batch["ntokens_list"] = ntokens_list
             batch["target_list"] = targets_list
         return batch
+
+    def collater_label(
+        self,
+        targets_by_label,
+        audio_size,
+        audio_starts,
+        is_item_annotated: torch.BoolTensor,
+    ):
+        targets_list, lengths_list, ntokens_list = [], [], []
+        itr = zip(targets_by_label, self.label_rates, self.pad_list)
+        for targets, label_rate, pad in itr:
+            if label_rate == -1.0:
+                targets, lengths, ntokens = self.collater_seq_label(targets, pad)
+            else:
+                targets, lengths, ntokens = self.collater_frm_label(
+                    targets,
+                    audio_size,
+                    audio_starts,
+                    label_rate,
+                    pad,
+                    is_item_annotated,
+                )
+            targets_list.append(targets)
+            lengths_list.append(lengths)
+            ntokens_list.append(ntokens)
+        return targets_list, lengths_list, ntokens_list
+
+    def collater_frm_label(
+        self, targets, audio_size, audio_starts, label_rate, pad, is_item_annotated
+    ):
+        assert label_rate > 0
+        s2f = label_rate / self.sample_rate
+        frm_starts = [int(round(s * s2f)) for s in audio_starts]
+        frm_size = int(round(audio_size * s2f))
+        if not self.pad_audio:
+            rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
+            frm_size = min(frm_size, *rem_size)
+        targets = [
+            t[s : s + frm_size] for t, s in zip(targets, frm_starts)
+        ]  # I guess this crops the labels to the minimum size
+        logger.debug(f"audio_starts={audio_starts}")
+        logger.debug(f"frame_starts={frm_starts}")
+        logger.debug(f"frame_size={frm_size}")
+
+        lengths = torch.LongTensor([len(t) for t in targets])
+        ntokens = lengths.sum().item()
+        targets = data_utils.collate_tokens(targets, pad_idx=pad, left_pad=False)
+        return targets, lengths, ntokens
+
+    # modified to deleted the warnings if the sample comes from the supervised pool
+    def verify_label_lengths(
+        self,
+        audio_sizes,
+        audio_rate,
+        label_path,
+        label_rate,
+        inds,
+        tot,
+        tol=0.1,  # tolerance in seconds
+    ):
+        if label_rate < 0:
+            logger.info(f"{label_path} is sequence label. skipped")
+            return
+
+        with open(label_path) as f:
+            lengths = [len(line.rstrip().split()) for line in f]
+            assert len(lengths) == tot
+            lengths = [lengths[i] for i in inds]
+        num_invalid = 0
+        for i, ind in enumerate(inds):
+            dur_from_audio = audio_sizes[i] / audio_rate
+            dur_from_label = lengths[i] / label_rate
+            if i < self.ssl_num_samples and abs(dur_from_audio - dur_from_label) > tol:
+                logger.warning(
+                    (
+                        f"audio and label duration differ too much "
+                        f"(|{dur_from_audio} - {dur_from_label}| > {tol}) "
+                        f"in line {ind+1} of {label_path}. Check if `label_rate` "
+                        f"is correctly set (currently {label_rate}). "
+                        f"num. of samples = {audio_sizes[i]}; "
+                        f"label length = {lengths[i]}"
+                    )
+                )
+                num_invalid += 1
+        if num_invalid > 0:
+            logger.warning(
+                f"total {num_invalid} (audio, label) pairs with mismatched lengths"
+            )
 
 
 # TODO: adapt this code for distributed sampling?

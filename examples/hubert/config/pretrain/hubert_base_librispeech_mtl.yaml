@@ -26,7 +26,7 @@ task:
   data: ???
   ssl_data: ??? # Added by me for MTL config
   label_dir: ???
-  labels: ???
+  labels: ["km"]
   label_rate: ${model.label_rate}
   sample_rate: 16000
   max_sample_size: 250000
@@ -36,7 +36,7 @@ task:
   normalize: false # must be consistent with extractor
 
 dataset:
-  num_workers: 6
+  num_workers: 2 # Bcs I got a warning: get it back up to 6 when training for good
   max_tokens: 1400000 # This is related to the batch size
   skip_invalid_size_inputs_valid_test: true
   validate_interval: 5
