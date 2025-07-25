@@ -72,7 +72,6 @@ model:
   mask_prob: 0.80
   extractor_mode: default
   conv_feature_layers: '[(512,10,5)] + [(512,3,2)] * 4 + [(512,2,2)] * 2'
-  final_dim: 256
   encoder_layerdrop: 0.05
   dropout_input: 0.1
   dropout_features: 0.1

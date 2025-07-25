@@ -439,7 +439,12 @@ class HubertMTLDataset(HubertDataset):
             return {}
 
         audios = [s["source"] for s in samples]
-        is_item_annotated = torch.BoolTensor([s["is_item_annotated"] for s in samples])
+        is_item_annotated = [s["is_item_annotated"] for s in samples]
+        assert (
+            is_item_annotated[0] == False
+            and sorted(is_item_annotated) == is_item_annotated
+        )  # If the ssl and sl items are not sequential, then we should rearrange them and their corresponding audios so that it is ordered
+
         audio_sizes = [len(s) for s in audios]
         if self.pad_audio:
             audio_size = min(max(audio_sizes), self.max_sample_size)
@@ -449,6 +454,7 @@ class HubertMTLDataset(HubertDataset):
             audios, audio_size
         )
 
+        # Labels are different for the ssl and sl task, only collate the labels for the ssl task (whose length depend on the audio)
         targets_by_label = [
             [s["label_list"][i] for s in samples] for i in range(self.num_labels)
         ]
@@ -481,7 +487,7 @@ class HubertMTLDataset(HubertDataset):
         targets_by_label,
         audio_size,
         audio_starts,
-        is_item_annotated: torch.BoolTensor,
+        is_item_annotated,
     ):
         targets_list, lengths_list, ntokens_list = [], [], []
         itr = zip(targets_by_label, self.label_rates, self.pad_list)
@@ -502,19 +508,31 @@ class HubertMTLDataset(HubertDataset):
             ntokens_list.append(ntokens)
         return targets_list, lengths_list, ntokens_list
 
+    # Assumption that targets are ordered with ssl samples first and sl sampels afterwards
     def collater_frm_label(
         self, targets, audio_size, audio_starts, label_rate, pad, is_item_annotated
     ):
         assert label_rate > 0
+
+        targets_ssl = [
+            targets[i] for i in range(len(targets)) if not is_item_annotated[i]
+        ]  # TODO: find faster method
+        audio_starts_ssl = [
+            audio_starts[i]
+            for i in range(len(audio_starts))
+            if not is_item_annotated[i]
+        ]
+
         s2f = label_rate / self.sample_rate
-        frm_starts = [int(round(s * s2f)) for s in audio_starts]
+        frm_starts = [int(round(s * s2f)) for s in audio_starts_ssl]
         frm_size = int(round(audio_size * s2f))
         if not self.pad_audio:
-            rem_size = [len(t) - s for t, s in zip(targets, frm_starts)]
+            rem_size = [len(t) - s for t, s in zip(targets_ssl, frm_starts)]
             frm_size = min(frm_size, *rem_size)
-        targets = [
-            t[s : s + frm_size] for t, s in zip(targets, frm_starts)
-        ]  # I guess this crops the labels to the minimum size
+        targets_ssl = [
+            t[s : s + frm_size] for t, s in zip(targets_ssl, frm_starts)
+        ]  # this crops the labels to the minimum size
+        targets[0 : len(targets_ssl)] = targets_ssl
         logger.debug(f"audio_starts={audio_starts}")
         logger.debug(f"frame_starts={frm_starts}")
         logger.debug(f"frame_size={frm_size}")

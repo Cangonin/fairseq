@@ -40,11 +40,11 @@ logger = logging.getLogger(__name__)
 class HubertMTLConfig(HubertConfig):
     # balance between the supervised and self-supervised tasks
     proportion_supervised_data: float = field(
-        default=0.1,
+        default=0.5,
         metadata={"help": "the proportion of supervised data in each training batch"},
     )
     num_classes_supervised: int = field(
-        default=5,
+        default=45,
         metadata={"help": "the number of classes included in the supervised task"},
     )
 
@@ -163,9 +163,9 @@ class HubertMTLModel(HubertModel):
 
         # supervised part (will give an output for everything, even for the parts without labels)
         x_mean = torch.mean(
-            x
+            x, dim=1
         )  # TODO: should we max pool instead? I guess mean is better because the vocalisations are longer than 25 ms?
-        logits_supervised = self.final_proj_supervised(x)
+        logits_supervised = self.final_proj_supervised(x_mean)
 
         result = {
             "logit_m_list": logit_m_list,

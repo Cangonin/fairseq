@@ -63,23 +63,36 @@ class HubertMTLCriterion(HubertCriterion):
         sample_size = 0
         logging_output = {}
         reduction = "sum" if reduce else "none"
-        is_sample_annotated: torch.BoolTensor = sample["is_sample_annotated"]
+        is_item_annotated = sample["is_item_annotated"]
 
         loss_m_list = []
-        logp_m_list = model.get_logits(net_output, True)[~is_sample_annotated] # TODO: is this correct??
-        targ_m_list = model.get_targets(net_output, True)[~is_sample_annotated]
+        logp_m_list = model.get_logits(net_output, True)
+        # logp_m_list = model.get_logits(net_output, True)[
+        #     ~is_item_annotated
+        # ]  # TODO: is this correct??
+        targ_m_list = model.get_targets(
+            net_output, True
+        )  # Those are only 0??? I don't get why
+        # targ_m_list = model.get_targets(net_output, True)[~is_item_annotated]
         assert self.pred_masked_weight == 0 or len(logp_m_list) > 0
         for i, (logp_m, targ_m) in enumerate(zip(logp_m_list, targ_m_list)):
-            loss_m = F.cross_entropy(logp_m, targ_m, reduction=reduction) # should I add the mask here? Did I get the reduction correctly?
+            loss_m = F.cross_entropy(
+                logp_m, targ_m, reduction=reduction
+            )  # should I add the mask here? Did I get the reduction correctly?
             loss_m_list.append(loss_m)
             logging_output[f"loss_m_{i}"] = loss_m.detach().item()
         if self.pred_masked_weight > 0:
             loss += self.pred_masked_weight * sum(loss_m_list)
-            sample_size += targ_m_list[0].numel() # TODO: what does the [0] correspond to exactly?
+            sample_size += targ_m_list[
+                0
+            ].numel()  # TODO: what does the [0] correspond to exactly?
 
         loss_u_list = []
-        logp_u_list = model.get_logits(net_output, False)[~is_sample_annotated]
-        targ_u_list = model.get_targets(net_output, False)[~is_sample_annotated]
+        logp_u_list = model.get_logits(net_output, False)
+        targ_u_list = model.get_targets(net_output, False)
+
+        # logp_u_list = model.get_logits(net_output, False)[~is_item_annotated]
+        # targ_u_list = model.get_targets(net_output, False)[~is_item_annotated]
         assert self.pred_nomask_weight == 0 or len(logp_u_list) > 0
         for i, (logp_u, targ_u) in enumerate(zip(logp_u_list, targ_u_list)):
             loss_u = F.cross_entropy(logp_u, targ_u, reduction=reduction)
@@ -108,26 +121,29 @@ class HubertMTLCriterion(HubertCriterion):
                     loss += p
                     logging_output[f"loss_{n}"] = p.item()
 
-        def compute_supervised_loss(
-            mask_supervised: torch.BoolTensor, logits: torch.Tensor, labels: torch.Tensor, reduction: Optional[str]
-        ) -> torch.Tensor:
-            labels = labels[mask_supervised]
-            logits = logits[mask_supervised]
-            masked_loss = F.binary_cross_entropy_with_logits(
-                logits, target=labels, reduction=reduction
-            )
-            return masked_loss
-        
-        supervised_loss = compute_supervised_loss(
-            mask_supervised=is_sample_annotated,
-            logits=model.get_supervised_logits(net_output),
-            labels=sample["supervised_labels"],
-        )
+        # def compute_supervised_loss(
+        #     mask_supervised: torch.BoolTensor,
+        #     logits: torch.Tensor,
+        #     labels: torch.Tensor,
+        #     reduction: Optional[str],
+        # ) -> torch.Tensor:
+        #     labels = labels[mask_supervised]
+        #     logits = logits[mask_supervised]
+        #     masked_loss = F.binary_cross_entropy_with_logits(
+        #         logits, target=labels, reduction=reduction
+        #     )
+        #     return masked_loss
 
-        # Weighted ssl and sl loss
-        ssl_task_weight = 1 - self.supervised_task_weight
-        loss = ssl_task_weight * loss + self.supervised_task_weight * supervised_loss
-        
+        # supervised_loss = compute_supervised_loss(
+        #     mask_supervised=is_item_annotated,
+        #     logits=model.get_supervised_logits(net_output),
+        #     labels=sample["supervised_labels"],
+        # )
+
+        # # Weighted ssl and sl loss
+        # ssl_task_weight = 1 - self.supervised_task_weight
+        # loss = ssl_task_weight * loss + self.supervised_task_weight * supervised_loss
+
         logging_output = {
             "loss": loss.item() if reduce else loss,
             "ntokens": sample_size,

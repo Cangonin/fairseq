@@ -415,7 +415,9 @@ class HubertModel(BaseFairseqModel):
             feat_tsz = int(targ_tsz / self.feat2tar_ratio)
             features = features[..., :feat_tsz]
         target_inds = torch.arange(feat_tsz).float() * self.feat2tar_ratio
-        target_list = [t[:, target_inds.long()] for t in target_list]
+        target_list = [
+            t[:, target_inds.long()] for t in target_list
+        ]  # will trim labels by taking one value out of 2. Why?? To align with the features I guess (but still weird)
         return features, target_list
 
     def forward_padding_mask(
