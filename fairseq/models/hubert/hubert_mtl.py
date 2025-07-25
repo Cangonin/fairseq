@@ -72,6 +72,7 @@ class HubertMTLModel(HubertModel):
     def forward(
         self,
         source: torch.Tensor,
+        is_item_annotated: torch.BoolTensor,
         target_list: Optional[List[torch.Tensor]] = None,
         padding_mask: Optional[torch.Tensor] = None,
         mask: bool = True,
@@ -118,6 +119,14 @@ class HubertMTLModel(HubertModel):
         if features_only:
             return {"x": x, "padding_mask": padding_mask, "features": features}
 
+        # supervised part (will give an output for everything, even for the parts without labels)
+        # only predict the supervised part of the batch
+
+        x_mean = torch.mean(
+            x[is_item_annotated], dim=1
+        )  # TODO: should we max pool instead? I guess mean is better because the vocalisations are longer than 25 ms?
+        logits_supervised = self.final_proj_supervised(x_mean)
+
         def compute_pred(proj_x, target, label_embs):
             # compute logits for the i-th label set
             y = torch.index_select(label_embs, 0, target.long())
@@ -131,6 +140,14 @@ class HubertMTLModel(HubertModel):
             return self.compute_nce(proj_x, y, negs)
 
         label_embs_list = self.label_embs_concat.split(self.num_classes, 0)
+
+        # do not forward the supervised part of the batch with the unlabelled part
+        x = x[~is_item_annotated]
+        padding_mask = padding_mask[~is_item_annotated]
+        mask_indices = mask_indices[~is_item_annotated]
+        target_list = [
+            target_list[i][~is_item_annotated] for i in range(len(target_list))
+        ]
 
         if not self.skip_masked:
             masked_indices = torch.logical_and(~padding_mask, mask_indices)
@@ -160,12 +177,6 @@ class HubertMTLModel(HubertModel):
             ]
         else:
             logit_u_list = [None for _ in target_list]
-
-        # supervised part (will give an output for everything, even for the parts without labels)
-        x_mean = torch.mean(
-            x, dim=1
-        )  # TODO: should we max pool instead? I guess mean is better because the vocalisations are longer than 25 ms?
-        logits_supervised = self.final_proj_supervised(x_mean)
 
         result = {
             "logit_m_list": logit_m_list,

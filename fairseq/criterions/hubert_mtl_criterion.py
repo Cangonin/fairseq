@@ -58,7 +58,11 @@ class HubertMTLCriterion(HubertCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(target_list=sample["target_list"], **sample["net_input"])
+        net_output = model(
+            target_list=sample["target_list"],
+            is_item_annotated=sample["is_item_annotated"],
+            **sample["net_input"],
+        )
         loss = 0.0
         sample_size = 0
         logging_output = {}

@@ -468,7 +468,7 @@ class HubertMTLDataset(HubertDataset):
         }
         batch = {
             "id": torch.LongTensor([s["id"] for s in samples]),
-            "is_item_annotated": is_item_annotated,
+            "is_item_annotated": torch.BoolTensor(is_item_annotated),
             "net_input": net_input,
         }
 
