@@ -116,30 +116,41 @@ class HubertMTLCriterion(HubertCriterion):
                     loss += p
                     logging_output[f"loss_{n}"] = p.item()
 
-        # def compute_supervised_loss(
-        #     logits: torch.Tensor,
-        #     labels: torch.Tensor,
-        #     reduction: Optional[str]=None,
-        #     mask_supervised: Optional[torch.BoolTensor]=None,
-        # ) -> torch.Tensor:
-        #     if mask_supervised:
-        #     labels = labels[mask_supervised]
-        #     logits = logits[mask_supervised]
-        #     masked_loss = F.binary_cross_entropy_with_logits(
-        #         logits, target=labels, reduction=reduction
-        #     )
-        #     return masked_loss
+        # TODO: should I apply weights so that the loss does not focus mostly on empty and rain segments? I think I should
+        def compute_supervised_loss(
+            logits: torch.Tensor,
+            labels: torch.Tensor,
+            reduction: Optional[str] = None,
+            mask_supervised: Optional[torch.BoolTensor] = None,
+        ) -> torch.Tensor:
+            if mask_supervised:
+                labels = labels[mask_supervised]
+                logits = logits[mask_supervised]
+            masked_loss = F.binary_cross_entropy_with_logits(
+                logits, target=labels, reduction=reduction
+            )
+            return masked_loss
 
-        # supervised_loss = compute_supervised_loss(
-        #     mask_supervised=is_item_annotated,
-        #     logits=model.get_supervised_logits(net_output),
-        #     labels=sample["supervised_labels"],
-        # )
-        # sample_size += logits.shape(0) # Add batch size. TODO: is this correct?
+        supervised_logits = model.get_supervised_logits(net_output)
+        supervised_labels = (
+            sample["target_list"][0][:, : supervised_logits.shape[-1]][
+                is_item_annotated
+            ]
+            - 4
+        )  # TODO: why do I need to take the first element of the list, and will this have an impact for distributed training? -4 because of label encoding at the beginning
+        supervised_loss = compute_supervised_loss(
+            mask_supervised=None,
+            logits=supervised_logits.type(torch.float32),
+            labels=supervised_labels.type(torch.float32),
+            reduction=reduction,
+        )
+        sample_size += supervised_labels.shape[
+            0
+        ]  # Add number of supervised elements. TODO: is this correct?
 
-        # # Weighted ssl and sl loss
-        # ssl_task_weight = 1 - self.supervised_task_weight
-        # loss = ssl_task_weight * loss + self.supervised_task_weight * supervised_loss
+        # Weighted ssl and sl loss
+        ssl_task_weight = 1 - self.supervised_task_weight
+        loss = ssl_task_weight * loss + self.supervised_task_weight * supervised_loss
 
         logging_output = {
             "loss": loss.item() if reduce else loss,
