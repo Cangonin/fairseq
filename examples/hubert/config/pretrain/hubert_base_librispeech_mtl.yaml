@@ -80,7 +80,7 @@ model:
   feature_grad_mult: 0.1
   untie_final_proj: true
   activation_dropout: 0.0
-  num_classes_supervised: 50 # Added by me for MTL config
+  num_classes_supervised: 61 # Added by me for MTL config
   proportion_supervised_data: 0.5  # Added by me for MTL config
 
 hydra:
