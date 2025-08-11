@@ -622,29 +622,26 @@ class UnevenBatchSampler(BatchSampler):
         self.supervised_size = round(self.supervised_sampling_ratio * self.batch_size)
         self.ssl_size = self.batch_size - self.supervised_size
 
-        # Estimate number of batches available. TODO: change that so that the num of batches doesn't depend on the supervised data?
-        # It could depend on the unsupervised data, but then I need to implement this in the sampler
-        self.num_batches = min(
-            len(self.ssl_all_indices) // self.ssl_size,
-            len(self.supervised_all_indices) // self.supervised_size,
-        )
+        # Estimate number of batches available, based on the length of the larger list (ssl)
+        self.num_batches = len(self.ssl_all_indices) // self.ssl_size
+        if not self.drop_last and len(self.ssl_all_indices) % self.ssl_size != 0:
+            self.num_batches += 1
 
     def __iter__(self):
         ssl_samples = random.sample(self.ssl_all_indices, len(self.ssl_all_indices))
         supervised_samples = random.sample(
             self.supervised_all_indices, len(self.supervised_all_indices)
         )
+        supervised_cycle = itertools.cycle(supervised_samples)
 
         for i in range(self.num_batches):
             ssl_start = i * self.ssl_size
-            supervised_start = i * self.supervised_size
-            batch = (
-                ssl_samples[ssl_start : ssl_start + self.ssl_size]
-                + supervised_samples[
-                    supervised_start : supervised_start + self.supervised_size
-                ]
-            )
+            ssl_batch = ssl_samples[ssl_start : ssl_start + self.ssl_size]
+            supervised_batch = [
+                next(supervised_cycle) for _ in range(self.supervised_size)
+            ]
+            batch = ssl_batch + supervised_batch
             yield batch
 
     def __len__(self):
-        return self.num_batches if self.drop_last else self.num_batches + 1
+        return self.num_batches
