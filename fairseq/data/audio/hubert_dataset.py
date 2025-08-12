@@ -382,6 +382,7 @@ class HubertMTLDataset(HubertDataset):
         self.sample_rate = sample_rate
         self.shuffle = shuffle
         self.random_crop = random_crop
+        self.manifest_path = manifest_path  # Used to get the correct batch sampler
 
         self.num_labels = len(label_paths)
         self.pad_list = pad_list
@@ -592,6 +593,7 @@ class UnevenBatchSampler(BatchSampler):
         num_samples_unlabelled_dataset: int,
         supervised_sampling_ratio: float = 0.5,
         drop_last=False,
+        repeat_supervised_samples: bool = True,
     ):
         """
         Args:
@@ -600,16 +602,20 @@ class UnevenBatchSampler(BatchSampler):
             num_samples_unlabelled_dataset (int): Tot number of samples of the unlabelled data. Samples after this values belong to the labelled data
             supervised_sampling_ratio (float): How much data from the supervised part should be included in the final batch
             drop_last (bool): Whether to drop the last incomplete batch.
+            repeat_supervised_samples: whether to cycle through the supervised samples or not. If not, the rest of the batches will be completed with unlabeled data.
+            The latter option is useful for the validation set, where we don't want to loop through the supervised samples
         """
         assert (
             0 < supervised_sampling_ratio < 1
         ), "supervised_sampling_ratio must be between 0 and 1 (exclusive)."
 
         self.batch_size = batch_size
+        self.size_dataset = size_dataset
         self.ssl_all_indices = [i for i in range(num_samples_unlabelled_dataset)]
         self.drop_last = drop_last
+        self.repeat_supervised_samples = repeat_supervised_samples
 
-        all_indices = set(range(size_dataset))
+        all_indices = set(range(self.size_dataset))
         self.supervised_all_indices = list(all_indices - set(self.ssl_all_indices))
         self.supervised_sampling_ratio = supervised_sampling_ratio
 
@@ -623,17 +629,33 @@ class UnevenBatchSampler(BatchSampler):
         self.ssl_size = self.batch_size - self.supervised_size
 
         # Estimate number of batches available, based on the length of the larger list (ssl)
-        self.num_batches = len(self.ssl_all_indices) // self.ssl_size
-        if not self.drop_last and len(self.ssl_all_indices) % self.ssl_size != 0:
-            self.num_batches += 1
+        if self.repeat_supervised_samples:
+            self.num_batches = len(self.ssl_all_indices) // self.ssl_size
+            if not self.drop_last and len(self.ssl_all_indices) % self.ssl_size != 0:
+                self.num_batches += 1
+        else:
+            self.num_batches = self.size_dataset // self.batch_size
+            if not self.drop_last and self.size_dataset % self.batch_size != 0:
+                self.num_batches += 1
 
-    def __iter__(self):
+    def build_ssl_sl_indices(self):
         ssl_samples = random.sample(self.ssl_all_indices, len(self.ssl_all_indices))
         supervised_samples = random.sample(
             self.supervised_all_indices, len(self.supervised_all_indices)
         )
-        supervised_cycle = itertools.cycle(supervised_samples)
 
+        if not self.repeat_supervised_samples:
+            # Let us make both lists have the same number of elements. TODO: fix the last batch (right now, we'll loop again at the beginning of the supervised batch)
+            num_samples_each_list = self.size_dataset // 2
+            num_elements_to_add = num_samples_each_list - len(
+                self.supervised_all_indices
+            )
+            supervised_samples.extend(ssl_samples[-num_elements_to_add:])
+            ssl_samples = ssl_samples[:-num_elements_to_add]
+        return ssl_samples, itertools.cycle(supervised_samples)
+
+    def __iter__(self):
+        ssl_samples, supervised_cycle = self.build_ssl_sl_indices()
         for i in range(self.num_batches):
             ssl_start = i * self.ssl_size
             ssl_batch = ssl_samples[ssl_start : ssl_start + self.ssl_size]
