@@ -59,8 +59,9 @@ class HubertMTLModel(HubertModel):
     ) -> None:
         super().__init__(cfg, task_cfg, dictionaries)
 
-        final_dim = cfg.final_dim if cfg.final_dim > 0 else cfg.encoder_embed_dim
-        self.final_proj_supervised = nn.Linear(final_dim, cfg.num_classes_supervised)
+        self.final_proj_supervised = nn.Linear(
+            cfg.encoder_embed_dim, cfg.num_classes_supervised
+        )
 
     @classmethod
     def build_model(cls, cfg: HubertMTLConfig, task: HubertMTLPretrainingTask):
