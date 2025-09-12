@@ -183,7 +183,7 @@ class HubertMTLPretrainingTask(HubertPretrainingTask):
             is_dataset_split_train = "train" in dataset.manifest_path
             batches = UnevenBatchSampler(
                 len(dataset),
-                batch_size=8,  # TODO: use max_tokens somehow instead or define the batch size in the config
+                batch_size=max_sentences,  # max_sentences corresponds effectively to the batch size
                 num_samples_unlabelled_dataset=dataset.ssl_num_samples,
                 repeat_supervised_samples=is_dataset_split_train,
             )
