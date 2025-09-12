@@ -150,10 +150,12 @@ class HubertMTLCriterion(HubertCriterion):
 
         # Weighted ssl and sl loss
         ssl_task_weight = 1 - self.supervised_task_weight
-        loss = ssl_task_weight * loss + self.supervised_task_weight * supervised_loss
+        tot_loss = ssl_task_weight * loss + self.supervised_task_weight * supervised_loss
 
         logging_output = {
-            "loss": loss.item() if reduce else loss,
+            "loss": tot_loss.item() if reduce else tot_loss,
+            "supervised_loss": supervised_loss.item() if reduce else supervised_loss,
+            "ssl_loss": loss.item() if reduce else loss,
             "ntokens": sample_size,
             "nsentences": sample["id"].numel(),
             "sample_size": sample_size,
@@ -187,7 +189,7 @@ class HubertMTLCriterion(HubertCriterion):
                 logging_output[f"correct_u_{i}"] = corr_u
                 logging_output[f"count_u_{i}"] = count_u
 
-        return loss, sample_size, logging_output
+        return tot_loss, sample_size, logging_output
 
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:

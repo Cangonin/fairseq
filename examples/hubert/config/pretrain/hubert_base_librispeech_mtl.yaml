@@ -9,7 +9,7 @@ common:
   wandb_project: hubert_mtl
 
 checkpoint:
-  save_interval_updates: 25000
+  save_interval_updates: 25000 # TODO: see if I need to reduce this value
   keep_interval_updates: 1
   no_epoch_checkpoints: true
 
@@ -37,8 +37,9 @@ task:
   normalize: false # must be consistent with extractor
 
 dataset:
-  num_workers: 2 # Bcs I got a warning: get it back up to 6 when training for good
-  max_tokens: 1400000 # This is related to the batch size
+  num_workers: 6 # Bcs I got a warning: get it back up to 6 when training for good
+  #max_tokens: 1400000 # This is related to the batch size
+  batch_size: 32 # Added to try to replace the more obscure max_tokens
   skip_invalid_size_inputs_valid_test: true
   validate_interval: 5
   validate_interval_updates: 10000
@@ -51,7 +52,7 @@ criterion:
   supervised_task_weight: 0.1 # Added by me for MTL config
 
 optimization:
-  max_update: 400000
+  max_update: 57000 # Originally 400000. One epoch is around 183357/(batch_size/2)=11460 steps (if one step=one batch). So 400k is around 35 epochs. Let's put 5 epochs for the first try: 57000
   lr: [0.0005]
   clip_norm: 10.0
 
@@ -63,14 +64,14 @@ optimizer:
 
 lr_scheduler:
   _name: polynomial_decay
-  warmup_updates: 32000
+  warmup_updates: 32000 #TODO: maybe reduce that value since my dataset is smaller
 
 model:
   _name: hubert_mtl
   label_rate: ???
   skip_masked: false
   skip_nomask: false
-  mask_prob: 0.80
+  mask_prob: 0.80 # TODO: potential value to change
   extractor_mode: default
   conv_feature_layers: '[(512,10,5)] + [(512,3,2)] * 4 + [(512,2,2)] * 2'
   encoder_layerdrop: 0.05
