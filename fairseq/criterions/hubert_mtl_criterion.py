@@ -144,10 +144,10 @@ class HubertMTLCriterion(HubertCriterion):
             labels=supervised_labels.type(torch.float32),
             reduction=reduction,
         )
-        sample_size += supervised_labels.shape[
-            0
-        ]  # Add number of supervised elements. TODO: is this correct?
-
+        logging_output["ssl_sample_size"] = sample_size
+        supervised_sample_size = supervised_labels.shape[0]
+        logging_output["supervised_sample_size"] = supervised_sample_size
+        sample_size += supervised_sample_size
         # Weighted ssl and sl loss
         ssl_task_weight = 1 - self.supervised_task_weight
         tot_loss = ssl_task_weight * loss + self.supervised_task_weight * supervised_loss
@@ -195,12 +195,20 @@ class HubertMTLCriterion(HubertCriterion):
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training (copied from normal cross entropy)."""
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
+        ssl_loss_sum = sum(log.get("ssl_loss", 0) for log in logging_outputs)
+        supervised_loss_sum = sum(log.get("supervised_loss", 0) for log in logging_outputs)
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
+        ssl_sample_size = sum(log.get("ssl_sample_size", 0) for log in logging_outputs)
+        supervised_sample_size = sum(log.get("supervised_sample_size", 0) for log in logging_outputs)
 
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
-        )
+        ) #TODO: why math.log(2)?
+        metrics.log_scalar(
+            "ssl_loss", ssl_loss_sum / ssl_sample_size / math.log(2), ssl_sample_size, round=3)
+        metrics.log_scalar(
+            "supervised_loss", supervised_loss_sum / supervised_sample_size / math.log(2), supervised_loss_sum, round=3)
         if sample_size != ntokens:
             metrics.log_scalar(
                 "nll_loss", loss_sum / ntokens / math.log(2), ntokens, round=3

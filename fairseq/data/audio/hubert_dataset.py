@@ -441,10 +441,13 @@ class HubertMTLDataset(HubertDataset):
 
         audios = [s["source"] for s in samples]
         is_item_annotated = [s["is_item_annotated"] for s in samples]
-        assert (
-            is_item_annotated[0] == False
-            and sorted(is_item_annotated) == is_item_annotated
-        )  # If the ssl and sl items are not sequential, then we should rearrange them and their corresponding audios so that it is ordered
+
+        is_dataset_split_train = "train" in self.manifest_path
+        if is_dataset_split_train:
+            assert (
+                is_item_annotated[0] == False
+                and sorted(is_item_annotated) == is_item_annotated
+            )  # If the ssl and sl items are not sequential, then we should rearrange them and their corresponding audios so that it is ordered
 
         audio_sizes = [len(s) for s in audios]
         if self.pad_audio:

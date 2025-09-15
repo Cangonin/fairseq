@@ -12,12 +12,15 @@ checkpoint:
   save_interval_updates: 25000 # TODO: see if I need to reduce this value
   keep_interval_updates: 1
   no_epoch_checkpoints: true
+  reset_optimizer: true # added by me to pre-train from a clean state
+  reset_dataloader: true # added by me to pre-train from a clean state
+  reset_meters: true # added by me to pre-train from a clean state
 
 
 distributed_training:
   ddp_backend: no_c10d
   distributed_backend: 'nccl'
-  distributed_world_size: 1
+  distributed_world_size: 1 # TODO: change if using multiple GPUs
   distributed_port: 29671
   nprocs_per_node: 1
   find_unused_parameters: true
