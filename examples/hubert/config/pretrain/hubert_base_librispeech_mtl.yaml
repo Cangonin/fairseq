@@ -3,14 +3,16 @@
 common:
   fp16: true
   log_format: json
-  log_interval: 200
+  log_interval: 10  # CHANGED. Originally 200
   seed: 1337
   tensorboard_logdir: tblog
   wandb_project: hubert_mtl
 
+# Right now, with a batch size of 32, the number of steps in one epoch is around 170159/(32/2)= 10635 steps
+# NB: the parameters are explained here: https://fairseq.readthedocs.io/en/latest/command_line_tools.html
 checkpoint:
-  save_interval_updates: 25000 # TODO: see if I need to reduce this value
-  keep_interval_updates: 1
+  save_interval_updates: 25000 # Will save the model every save_interval_updates steps
+  keep_interval_updates: 1 # keep the last N checkpoints saved with –save-interval-updates
   no_epoch_checkpoints: true
   reset_optimizer: true # added by me to pre-train from a clean state
   reset_dataloader: true # added by me to pre-train from a clean state
@@ -20,7 +22,7 @@ checkpoint:
 distributed_training:
   ddp_backend: no_c10d
   distributed_backend: 'nccl'
-  distributed_world_size: 1 # TODO: change if using multiple GPUs
+  distributed_world_size: 1 # How many GPUs to use. TODO: change if using multiple GPUs
   distributed_port: 29671
   nprocs_per_node: 1
   find_unused_parameters: true
@@ -41,11 +43,11 @@ task:
 
 dataset:
   num_workers: 6 # Bcs I got a warning: get it back up to 6 when training for good
-  #max_tokens: 1400000 # This is related to the batch size
+  #max_tokens: 1400000 # maximum number of tokens in a batch (another way to specify the batch size)
   batch_size: 32 # Added to try to replace the more obscure max_tokens
   skip_invalid_size_inputs_valid_test: true
-  validate_interval: 5
-  validate_interval_updates: 10000
+  validate_interval: 5 # validate every N epochs
+  validate_interval_updates: 10000 # validate every N updates -> Here, it corresponds to validate almost every epoch
 
 criterion:
   _name: hubert_mtl
@@ -55,9 +57,10 @@ criterion:
   supervised_task_weight: 0.1 # Added by me for MTL config
 
 optimization:
-  max_update: 57000 # Originally 400000. One epoch is around 183357/(batch_size/2)=11460 steps (if one step=one batch). So 400k is around 35 epochs. Let's put 5 epochs for the first try: 57000
+  max_update: 57000 # force stop training at specified update. Originally 400000, but reduced it to have around 6/7 epochs.
   lr: [0.0005]
-  clip_norm: 10.0
+  clip_norm: 10.0 # clip threshold of gradients
+  update_freq: [4] # ADDED by me to raise the batch size without OOM. # update parameters every N_i batches, when in epoch i 
 
 optimizer:
   _name: adam
@@ -67,7 +70,7 @@ optimizer:
 
 lr_scheduler:
   _name: polynomial_decay
-  warmup_updates: 32000 #TODO: maybe reduce that value since my dataset is smaller
+  warmup_updates: 32000 # Num of steps it takes before reaching the value specified in optimization.lr TODO: maybe reduce that value since my dataset is smaller
 
 model:
   _name: hubert_mtl
@@ -75,6 +78,7 @@ model:
   skip_masked: false
   skip_nomask: false
   mask_prob: 0.80 # TODO: potential value to change
+  mask_length: 10 # ADDED Each window is 20 ms, so this masks 200 ms. Taken from the default values. TODO: change it?
   extractor_mode: default
   conv_feature_layers: '[(512,10,5)] + [(512,3,2)] * 4 + [(512,2,2)] * 2'
   encoder_layerdrop: 0.05

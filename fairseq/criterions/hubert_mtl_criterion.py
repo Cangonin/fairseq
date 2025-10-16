@@ -97,7 +97,7 @@ class HubertMTLCriterion(HubertCriterion):
             loss += self.pred_nomask_weight * sum(loss_u_list)
             sample_size += targ_u_list[
                 0
-            ].numel()  # TODO: how to modify correctly sample_size??
+            ].numel()  # 
 
         if self.loss_weights is not None:
             assert hasattr(model, "get_extra_losses")
@@ -207,8 +207,9 @@ class HubertMTLCriterion(HubertCriterion):
         ) #TODO: why math.log(2)?
         metrics.log_scalar(
             "ssl_loss", ssl_loss_sum / ssl_sample_size / math.log(2), ssl_sample_size, round=3)
-        metrics.log_scalar(
-            "supervised_loss", supervised_loss_sum / supervised_sample_size / math.log(2), supervised_loss_sum, round=3)
+        if supervised_sample_size > 0:
+            metrics.log_scalar(
+                "supervised_loss", supervised_loss_sum / supervised_sample_size / math.log(2), supervised_loss_sum, round=3)
         if sample_size != ntokens:
             metrics.log_scalar(
                 "nll_loss", loss_sum / ntokens / math.log(2), ntokens, round=3
